@@ -596,7 +596,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ip_updater_private"
+name = "ip_updater"
 version = "0.1.0"
 dependencies = [
  "chrono",
