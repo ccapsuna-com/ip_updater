@@ -3,8 +3,6 @@ name: build-and-move-binary
 on:
   push:
     branches: ["main"]
-  pull_request:
-    branches: ["main"]
 
 env:
   cargo_term_color: always
