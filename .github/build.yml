@@ -1,0 +1,19 @@
+name: build-and-move-binary
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  cargo_term_color: always
+
+jobs:
+  build-and-move:
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: cargo build --release
+    - name: Move
+      run: mv target/release/${{ github.event.repository.name }} /opt/projects_bin/
