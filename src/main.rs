@@ -284,7 +284,7 @@ fn release_lock() -> () {
 const LOGS_ROOT_LOCATION: &str = "/var/log/cc_app_logs/ip_updater/";
 const IP_HISTORY_FILE_NAME: &str = "ip_history.log";
 const MAIN_LOG_FILE_NAME: &str = "main.log";
-const LOCK_FILE_NAME: &str = "/opt/projects_bin/ip_updater.lock";
+const LOCK_FILE_NAME: &str = "/opt/bin/ip_updater.lock";
 const FILE_LOG_OUTPUT_FORMAT: &str = "{d(%Y-%m-%d %H:%M:%S %Z)(utc)} {l} {t} - {m}{n}";
 
 fn main() {
