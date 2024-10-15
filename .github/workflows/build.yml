@@ -17,6 +17,6 @@ jobs:
     - name: Build
       run: cargo build --release
     - name: Move
-      run: mv target/release/${{ github.event.repository.name }} /opt/projects_bin/
+      run: mv target/release/${{ github.event.repository.name }} /opt/bin
     - name: Change ownership to executors group
       run: chown github_worker:binary_executors /opt/projects_bin/${{ github.event.repository.name }}
