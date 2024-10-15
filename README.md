@@ -7,5 +7,10 @@ For authenticataion, a gpg encrypted file needs to exist at the location `/home/
 
 **Note:** Don't use your global access token. Create a token with a narrow scope. Cloudflare has helpful templates when you go to create the token.
 
-If there are any questions, please drop me an e-mail at cristian.capsuna@gmail.com
+The program also has 4 constants that control the location and names of various files it creates and manages. They are:
+- LOGS_ROOT_LOCATION
+- IP_HISTORY_FILE_NAME
+- MAIN_LOG_FILE_NAME
+- LOCK_FILE_NAME
 
+If there are any questions, please drop me an e-mail at cristian.capsuna@gmail.com
