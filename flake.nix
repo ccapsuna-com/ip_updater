@@ -31,15 +31,23 @@
       {
         devShells.default = pkgs.mkShell {
           name = "rust-dev-shell";
-          # # The below was tricky to find but very important for VS Code
-          # # if you run without an extension and launch from within the dev shell
-          # buildInputs = [
-          #   pkgs.bashInteractive
-          # ];
+
+          buildInputs = with pkgs; [
+            pkg-config
+            # python313
+            # gcc
+            # libvirt
+            # The below was tricky to find but very important for VS Code
+            # if you run without an extension and launch from within the dev shell.
+            # from withing the shell)
+            # bashInteractive
+          ];
           # Packages available in the development shell
           packages = with pkgs; [
             rustToolchain
             rust-analyzer
+            openssl
+            gnupg
           ];
 
           # Environment variables

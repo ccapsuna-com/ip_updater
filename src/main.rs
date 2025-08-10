@@ -1,6 +1,7 @@
 #![allow(non_camel_case_types)] 
 use std::{
     fs::File
+    , fs::create_dir_all
     , fs::remove_file
     , net::Ipv4Addr
     , path::Path
@@ -23,6 +24,24 @@ use log4rs::append::{console::ConsoleAppender, file::FileAppender};
 use log4rs::encode::pattern::PatternEncoder;
 use log4rs::config::{Appender, Config, Logger, Root};
 use http::header;
+use once_cell::sync::Lazy;
+
+const PROGRAM_NAME: &str = "ip_updater";
+static HOME_DIRECTORY: Lazy<String> = Lazy::new(|| {
+    std::env::var("HOME").expect("HOME environment variable not set")
+});
+static LOGS_ROOT_LOCATION: Lazy<String> = Lazy::new(|| {
+    format!("{}/{}", env::var("XDG_STATE_HOME").unwrap_or_else(|_| format!("{}/.local/state", HOME_DIRECTORY.to_string())), PROGRAM_NAME)
+});
+static LOCK_FILE_DIRECTORY: Lazy<String> = Lazy::new(|| {
+    format!("{}/{}", env::var("XDG_RUNTIME_DIR").unwrap(), PROGRAM_NAME)
+});
+static AUTH_FILE: Lazy<String> = Lazy::new(|| {
+    format!("{}/{}/{}", env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!("{}/.config", HOME_DIRECTORY.to_string())), PROGRAM_NAME, ".ip_updater_auth.gpg")
+});
+const IP_HISTORY_FILE_NAME: &str = "ip_history.log";
+const MAIN_LOG_FILE_NAME: &str = "main.log";
+const FILE_LOG_OUTPUT_FORMAT: &str = "{d(%Y-%m-%d %H:%M:%S %Z)(utc)} {l} {t} - {m}{n}";
 
 #[derive(Deserialize, Debug)]
 struct auth_info {
@@ -130,7 +149,7 @@ where P: AsRef<Path>, {
 
 fn get_auth_info() -> auth_info {
     let mut auth_data_command = Command::new("gpg");
-    auth_data_command.args(["--decrypt", "/home/ip_updater/.ip_updater_auth.gpg"]);
+    auth_data_command.args(["--decrypt", AUTH_FILE.as_str()]);
     let auth_data_command_output = auth_data_command.output().unwrap_or_else(|e|{
             log_error_and_panic(format!(
                 "Decryption did not run successfully. Error was:\n\n{}"
@@ -156,6 +175,8 @@ fn get_auth_info() -> auth_info {
             unreachable!()
         })
     } else {
+        println!("Status code was: {}", format!("{output_status_code}"));
+        println!("The command that was run was: {}", format!("Command was {auth_data_command:#?}"));
         log_error_and_panic(format!(
             "Decryption status code was not 0. Decryption output was:\n\n{}\n\nDecryption error was:\n\n{}"
             , output_message
@@ -266,7 +287,7 @@ fn release_lock() -> () {
     let mut lock_released = false;
     let loop_start_time = Instant::now();
     while lock_released == false && loop_start_time.elapsed() < Duration::from_secs(5) {
-        let lock_file_removal = remove_file(LOCK_FILE_NAME);
+        let lock_file_removal = remove_file(format!("{}/{PROGRAM_NAME}.lock", LOCK_FILE_DIRECTORY.to_string()));
         lock_released = match lock_file_removal {
             Ok(_) => true
             , Err(_) => {
@@ -281,12 +302,6 @@ fn release_lock() -> () {
     }
 }
 
-const LOGS_ROOT_LOCATION: &str = "/var/log/cc_app_logs/ip_updater/";
-const IP_HISTORY_FILE_NAME: &str = "ip_history.log";
-const MAIN_LOG_FILE_NAME: &str = "main.log";
-const LOCK_FILE_NAME: &str = "/opt/bin/ip_updater.lock";
-const FILE_LOG_OUTPUT_FORMAT: &str = "{d(%Y-%m-%d %H:%M:%S %Z)(utc)} {l} {t} - {m}{n}";
-
 fn main() {
     ////// Parameters
 
@@ -295,8 +310,9 @@ fn main() {
     ////// Creating lock file
     let loop_start_time = Instant::now();
     let mut lock_acquired = false;
+    create_dir_all(LOCK_FILE_DIRECTORY.to_string()).expect("Could not create the directory path for the lock file");
     while lock_acquired == false && loop_start_time.elapsed() < Duration::from_secs(5) {
-        let lock_file = File::create_new(LOCK_FILE_NAME);
+        let lock_file = File::create_new(format!("{}/{PROGRAM_NAME}.lock", LOCK_FILE_DIRECTORY.to_string()));
         lock_acquired = match lock_file {
             Ok(_) => true
             , Err(_) => {
@@ -316,13 +332,14 @@ fn main() {
         "5" => LevelFilter::Trace,
         _ => LevelFilter::Info,
     };
-
+    
+    create_dir_all(LOGS_ROOT_LOCATION.to_string()).expect("Could not create the directory path for the logs");
     // Creating the console logger
     let stdout = ConsoleAppender::builder().build();
     // Creating the file logger for for the project with a specific output format and location
     let log_file_appender_result = FileAppender::builder()
         .encoder(Box::new(PatternEncoder::new(FILE_LOG_OUTPUT_FORMAT)))
-        .build(format!("{LOGS_ROOT_LOCATION}{MAIN_LOG_FILE_NAME}"));
+        .build(format!("{}/{MAIN_LOG_FILE_NAME}", LOGS_ROOT_LOCATION.to_string()));
     let log_file_appender = log_file_appender_result.unwrap_or_else(|e|{
         release_lock();
         panic!("Could not create main log file appender. Error was:\n\n{e}");
@@ -330,7 +347,7 @@ fn main() {
     // Configuring the ip history logger
     let history_file_appender_result = FileAppender::builder()
         .encoder(Box::new(PatternEncoder::new(FILE_LOG_OUTPUT_FORMAT)))
-        .build(format!("{LOGS_ROOT_LOCATION}{IP_HISTORY_FILE_NAME}"));
+        .build(format!("{}/{IP_HISTORY_FILE_NAME}", LOGS_ROOT_LOCATION.to_string()));
     let history_file_appender = history_file_appender_result.unwrap_or_else(|e|{
         release_lock();
         panic!("Could not create ip history file appender. Error was:\n\n{e}");
@@ -365,7 +382,7 @@ fn main() {
             unreachable!();
     }
     let current_ip = get_ip();
-    match read_lines(format!("{LOGS_ROOT_LOCATION}{IP_HISTORY_FILE_NAME}")) {
+    match read_lines(format!("{}/{IP_HISTORY_FILE_NAME}", LOGS_ROOT_LOCATION.to_string())) {
         Ok(lines) => {
             let last_line = lines.last().unwrap_or(Ok("".to_string())).unwrap_or("".to_string());
             let ip_string = last_line.split(" ").last().unwrap_or("");
