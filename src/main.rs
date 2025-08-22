@@ -1,8 +1,10 @@
-#![allow(non_camel_case_types)] 
 use std::{
-    fs::File
-    , fs::create_dir_all
-    , fs::remove_file
+    fs::{
+        File
+        , read_to_string
+        , create_dir_all
+        , remove_file
+    }
     , net::Ipv4Addr
     , path::Path
     , io
@@ -12,7 +14,6 @@ use std::{
     , time::Duration
     , time::Instant
     , thread::sleep
-    , process::Command
 };
 use serde::{Serialize
     ,Deserialize
@@ -36,22 +37,35 @@ static LOGS_ROOT_LOCATION: Lazy<String> = Lazy::new(|| {
 static LOCK_FILE_DIRECTORY: Lazy<String> = Lazy::new(|| {
     format!("{}/{}", env::var("XDG_RUNTIME_DIR").unwrap(), PROGRAM_NAME)
 });
-static AUTH_FILE: Lazy<String> = Lazy::new(|| {
-    format!("{}/{}/{}", env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!("{}/.config", HOME_DIRECTORY.to_string())), PROGRAM_NAME, ".ip_updater_auth.gpg")
+static KEY_PATH: Lazy<String> = Lazy::new(|| {
+    format!("{}", env::var("KEY_PATH").unwrap_or_else(|_| "/run/secrets/ip_updater_key".to_string()))
+});
+static ZONE_PATH: Lazy<String> = Lazy::new(|| {
+    format!("{}", env::var("ZONE_PATH").unwrap_or_else(|_| "/ip_updater_zone".to_string()))
+});
+static RECORD_PATH: Lazy<String> = Lazy::new(|| {
+    format!("{}", env::var("RECORD_PATH").unwrap_or_else(|_| "/ip_updater_record".to_string()))
+});
+static IP_UPDATER_INTERVAL_SECONDS: Lazy<u64> = Lazy::new(|| {
+    env::var("IP_UPDATER_INTERVAL_MINUTES")
+        .unwrap_or_else(|_| "10".to_string())
+        .parse::<u64>()
+        .unwrap_or(10)
+        * 60
 });
 const IP_HISTORY_FILE_NAME: &str = "ip_history.log";
 const MAIN_LOG_FILE_NAME: &str = "main.log";
 const FILE_LOG_OUTPUT_FORMAT: &str = "{d(%Y-%m-%d %H:%M:%S %Z)(utc)} {l} {t} - {m}{n}";
 
 #[derive(Deserialize, Debug)]
-struct auth_info {
+struct AuthInfo {
     key: String
     , zone: String
     , record: String
 }
 
 #[derive(Serialize, Debug)]
-struct cloudflare_patch_record_request<'a> {
+struct CloudflarePatchRecordRequest<'a> {
     name: &'a str
     , r#type: &'a str
     , content: Ipv4Addr
@@ -99,7 +113,7 @@ struct cloudflare_patch_record_request<'a> {
 // }
 
 #[derive(Deserialize, Debug)]
-struct new_ip_response {
+struct NewIpResponse {
     ip: String
 }
 
@@ -120,10 +134,10 @@ fn get_ip() -> Ipv4Addr {
             log_error_and_panic(format!("Could not convert ip response to text. Error was:\n\n{e}"));
             unreachable!()
         });
-    let ip_string_struct: new_ip_response = serde_json::from_str(ip_string_response_text.as_str())
+    let ip_string_struct: NewIpResponse = serde_json::from_str(ip_string_response_text.as_str())
         .unwrap_or_else(|e|{
             log_error_and_panic(format!(
-                "Could not convert ip response to new_ip_response. Response was:\n\n{}\n\nError was:\n\n{}"
+                "Could not convert ip response to NewIpResponse. Response was:\n\n{}\n\nError was:\n\n{}"
                 , ip_string_response_text
                 , e
             ));
@@ -131,7 +145,7 @@ fn get_ip() -> Ipv4Addr {
         });
     Ipv4Addr::from_str(ip_string_struct.ip.as_str()).unwrap_or_else(|e|{
             log_error_and_panic(format!(
-                "Could not convert ip response to new_ip_response. IP from response text was:\n\n{}\n\nError was:\n\n{}"
+                "Could not convert ip response to NewIpResponse. IP from response text was:\n\n{}\n\nError was:\n\n{}"
                 , ip_string_response_text
                 , e
             ));
@@ -147,42 +161,32 @@ where P: AsRef<Path>, {
     Ok(io::BufReader::new(file).lines())
 }
 
-fn get_auth_info() -> auth_info {
-    let mut auth_data_command = Command::new("gpg");
-    auth_data_command.args(["--decrypt", AUTH_FILE.as_str()]);
-    let auth_data_command_output = auth_data_command.output().unwrap_or_else(|e|{
-            log_error_and_panic(format!(
-                "Decryption did not run successfully. Error was:\n\n{}"
-                , e
-            ));
-            unreachable!()
-        });
-    let output_message = String::from_utf8(auth_data_command_output.stdout).expect("Terminal output is always valid utf8");
-    let output_error = String::from_utf8(auth_data_command_output.stderr).expect("Terminal output is always valid utf8");
-    let output_status_code = auth_data_command_output.status.code().unwrap_or_else(||{
-            log_error_and_panic(format!(
-                "Decryption status code was None"
-            ));
-            unreachable!()
-        });
-    if output_status_code == 0 {
-        serde_json::from_str::<auth_info>(output_message.as_str()).unwrap_or_else(|e|{
-            log_error_and_panic(format!(
-                "Could not convert decryption output to auth_info. Decryption output was:\n\n{}\n\nError was:\n\n{}"
-                , output_message
-                , e
-            ));
-            unreachable!()
-        })
-    } else {
-        println!("Status code was: {}", format!("{output_status_code}"));
-        println!("The command that was run was: {}", format!("Command was {auth_data_command:#?}"));
+fn get_auth_info() -> AuthInfo {
+    let key = read_to_string(KEY_PATH.to_string()).unwrap_or_else(|e|{
         log_error_and_panic(format!(
-            "Decryption status code was not 0. Decryption output was:\n\n{}\n\nDecryption error was:\n\n{}"
-            , output_message
-            , output_error
+            "Could retrieve Cloudflare key. Error was:\n\n{}"
+            , e
         ));
         unreachable!()
+    });
+    let zone = read_to_string(ZONE_PATH.to_string()).unwrap_or_else(|e|{
+        log_error_and_panic(format!(
+            "Could retrieve Cloudflare zone. Error was:\n\n{}"
+            , e
+        ));
+        unreachable!()
+    });
+    let record = read_to_string(RECORD_PATH.to_string()).unwrap_or_else(|e|{
+        log_error_and_panic(format!(
+            "Could retrieve Cloudflare record. Error was:\n\n{}"
+            , e
+        ));
+        unreachable!()
+    });
+    AuthInfo {
+        key
+        , zone
+        , record
     }
 }
 
@@ -201,7 +205,7 @@ fn record_ip_and_send(new_ip: Ipv4Addr) -> () {
     });
     custom_header_value.set_sensitive(true);
     headers.insert(header::AUTHORIZATION, custom_header_value);
-    
+
     // How to get the current ip from Cloudflare
     
     // let call_url = format!("{}/zones/{}/dns_records", api_url, auth_stuff.zone);
@@ -235,7 +239,7 @@ fn record_ip_and_send(new_ip: Ipv4Addr) -> () {
     // println!("{response_body:#?}");
     /////////////////
 
-    let ip_update_body = cloudflare_patch_record_request {
+    let ip_update_body = CloudflarePatchRecordRequest {
         name: "ccapsuna.com"
         , r#type: "A"
         , content: new_ip
@@ -267,6 +271,7 @@ fn record_ip_and_send(new_ip: Ipv4Addr) -> () {
     if response.status().is_success() {
         info!(target: "history_logger", "The new ip is: {}", &new_ip);
         info!("IP updated successfully");
+        ()
     } else {
         let response_text = response.text().unwrap_or_else(|e|{
             log_error_and_panic(format!(
@@ -381,30 +386,33 @@ fn main() {
             ));
             unreachable!();
     }
-    let current_ip = get_ip();
-    match read_lines(format!("{}/{IP_HISTORY_FILE_NAME}", LOGS_ROOT_LOCATION.to_string())) {
-        Ok(lines) => {
-            let last_line = lines.last().unwrap_or(Ok("".to_string())).unwrap_or("".to_string());
-            let ip_string = last_line.split(" ").last().unwrap_or("");
-            match Ipv4Addr::from_str(ip_string) {
-                Ok(last_ip) => {
-                    if last_ip != current_ip {
-                        record_ip_and_send(current_ip);
-                        release_lock();
-                    } else {
-                        info!("IP has not changed.");
-                        release_lock();
+    loop {
+        sleep(Duration::from_secs(*IP_UPDATER_INTERVAL_SECONDS));
+        let current_ip = get_ip();
+        match read_lines(format!("{}/{IP_HISTORY_FILE_NAME}", LOGS_ROOT_LOCATION.to_string())) {
+            Ok(lines) => {
+                let last_line = lines.last().unwrap_or(Ok("".to_string())).unwrap_or("".to_string());
+                let ip_string = last_line.split(" ").last().unwrap_or("");
+                match Ipv4Addr::from_str(ip_string) {
+                    Ok(last_ip) => {
+                        if last_ip != current_ip {
+                            record_ip_and_send(current_ip);
+                            release_lock();
+                        } else {
+                            info!("IP has not changed.");
+                            release_lock();
+                        }
                     }
-                }
-                , Err(_) => {
-                    record_ip_and_send(current_ip);
-                    release_lock()
+                    , Err(_) => {
+                        record_ip_and_send(current_ip);
+                        release_lock()
+            }
                 }
             }
-        }
-        , Err(_) => {
-            record_ip_and_send(current_ip);
-            release_lock()
-        }
-    };
+            , Err(_) => {
+                record_ip_and_send(current_ip);
+                release_lock()
+            }
+        };
+    }
 }
