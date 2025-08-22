@@ -1,2 +1,5 @@
 /target
 .direnv
+ip_updater_key
+ip_updater_zone
+ip_updater_record

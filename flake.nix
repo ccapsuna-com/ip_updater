@@ -66,6 +66,11 @@
             echo "  rustc --version"
           '';
 
+          KEY_PATH = "/home/cc/projects/ip_updater/ip_updater_key";
+          ZONE_PATH = "/home/cc/projects/ip_updater/ip_updater_zone";
+          RECORD_PATH = "/home/cc/projects/ip_updater/ip_updater_record";
+          IP_UPDATER_INTERVAL_MINUTES = "0.1";
+
         };
       });
 }

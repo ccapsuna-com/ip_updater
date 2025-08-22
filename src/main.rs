@@ -46,12 +46,12 @@ static ZONE_PATH: Lazy<String> = Lazy::new(|| {
 static RECORD_PATH: Lazy<String> = Lazy::new(|| {
     format!("{}", env::var("RECORD_PATH").unwrap_or_else(|_| "/ip_updater_record".to_string()))
 });
-static IP_UPDATER_INTERVAL_SECONDS: Lazy<u64> = Lazy::new(|| {
+static IP_UPDATER_INTERVAL_SECONDS: Lazy<f64> = Lazy::new(|| {
     env::var("IP_UPDATER_INTERVAL_MINUTES")
         .unwrap_or_else(|_| "10".to_string())
-        .parse::<u64>()
-        .unwrap_or(10)
-        * 60
+        .parse::<f64>()
+        .unwrap_or(10.into())
+        * 60 as f64
 });
 const IP_HISTORY_FILE_NAME: &str = "ip_history.log";
 const MAIN_LOG_FILE_NAME: &str = "main.log";
@@ -309,7 +309,6 @@ fn release_lock() -> () {
 
 fn main() {
     ////// Parameters
-
     let log_level = env::var("LOG_LEVEL").unwrap_or_else(|_| "3".to_string());
 
     ////// Creating lock file
@@ -386,8 +385,31 @@ fn main() {
             ));
             unreachable!();
     }
+    let mut outer_lock = true;
     loop {
-        sleep(Duration::from_secs(*IP_UPDATER_INTERVAL_SECONDS));
+        if outer_lock == false {
+            let loop_start_time = Instant::now();
+            let mut lock_acquired = false;
+            create_dir_all(LOCK_FILE_DIRECTORY.to_string()).expect("Could not create the directory path for the lock file");
+            while lock_acquired == false && loop_start_time.elapsed() < Duration::from_secs(5) {
+                let lock_file = File::create_new(format!("{}/{PROGRAM_NAME}.lock", LOCK_FILE_DIRECTORY.to_string()));
+                lock_acquired = match lock_file {
+                    Ok(_) => true
+                    , Err(_) => {
+                        sleep(Duration::from_secs_f32(0.5));
+                        false
+                    }
+                }
+            }
+            if lock_acquired == false {
+                log_error_and_panic(format!(
+                        "Lock file could not be create since it is already present and did not \
+                        disappear within 5 seconds of the program start"
+                    ));
+                    unreachable!();
+            }
+        };
+        outer_lock = false;
         let current_ip = get_ip();
         match read_lines(format!("{}/{IP_HISTORY_FILE_NAME}", LOGS_ROOT_LOCATION.to_string())) {
             Ok(lines) => {
@@ -414,5 +436,6 @@ fn main() {
                 release_lock()
             }
         };
+        sleep(Duration::from_secs(*IP_UPDATER_INTERVAL_SECONDS as u64));
     }
 }
