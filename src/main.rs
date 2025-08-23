@@ -35,7 +35,7 @@ static LOGS_ROOT_LOCATION: Lazy<String> = Lazy::new(|| {
     format!("{}/{}", env::var("XDG_STATE_HOME").unwrap_or_else(|_| format!("{}/.local/state", HOME_DIRECTORY.to_string())), PROGRAM_NAME)
 });
 static LOCK_FILE_DIRECTORY: Lazy<String> = Lazy::new(|| {
-    format!("{}/{}", env::var("XDG_RUNTIME_DIR").unwrap(), PROGRAM_NAME)
+    format!("{}/{}", env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run".to_string()), PROGRAM_NAME)
 });
 static KEY_PATH: Lazy<String> = Lazy::new(|| {
     format!("{}", env::var("KEY_PATH").unwrap_or_else(|_| "/run/secrets/ip_updater_key".to_string()))

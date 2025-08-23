@@ -1,0 +1,21 @@
+services:
+  ip_updater:
+    image: cristiancapsuna/ip_updater:latest
+    deploy:
+      restart_policy:
+        condition: none
+    secrets:
+      - ip_updater_key
+    configs:
+      - ip_updater_record
+      - ip_updater_zone
+
+secrets:
+  ip_updater_key:
+    external: true
+
+configs:
+  ip_updater_record:
+    external: true
+  ip_updater_zone:
+    external: true
