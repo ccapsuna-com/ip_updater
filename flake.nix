@@ -40,7 +40,7 @@
             # The below was tricky to find but very important for VS Code
             # if you run without an extension and launch from within the dev shell.
             # from withing the shell)
-            # bashInteractive
+            bashInteractive
           ];
           # Packages available in the development shell
           packages = with pkgs; [
