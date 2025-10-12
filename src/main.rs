@@ -164,21 +164,24 @@ where P: AsRef<Path>, {
 fn get_auth_info() -> AuthInfo {
     let key = read_to_string(KEY_PATH.to_string()).unwrap_or_else(|e|{
         log_error_and_panic(format!(
-            "Could retrieve Cloudflare key. Error was:\n\n{}"
+            "Could not retrieve Cloudflare key at path {}. Error was:\n\n{}"
+            , KEY_PATH.to_string()
             , e
         ));
         unreachable!()
     });
     let zone = read_to_string(ZONE_PATH.to_string()).unwrap_or_else(|e|{
         log_error_and_panic(format!(
-            "Could retrieve Cloudflare zone. Error was:\n\n{}"
+            "Could not retrieve Cloudflare zone at path {}. Error was:\n\n{}"
+            , ZONE_PATH.to_string()
             , e
         ));
         unreachable!()
     });
     let record = read_to_string(RECORD_PATH.to_string()).unwrap_or_else(|e|{
         log_error_and_panic(format!(
-            "Could retrieve Cloudflare record. Error was:\n\n{}"
+            "Could not retrieve Cloudflare record at path {}. Error was:\n\n{}"
+            , RECORD_PATH.to_string()
             , e
         ));
         unreachable!()
