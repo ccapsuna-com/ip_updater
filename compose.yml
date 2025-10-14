@@ -9,6 +9,10 @@ services:
     configs:
       - ip_updater_record
       - ip_updater_zone
+    environment:
+      - KEY_PATH="/run/secrets/ip_updater_key"
+      - ZONE_PATH="/ip_updater_zone"
+      - RECORD_PATH="/ip_updater_record"
 
 secrets:
   ip_updater_key:

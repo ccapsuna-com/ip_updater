@@ -8,11 +8,16 @@ This application is designed to run as a Docker container and is configured usin
 
 The following Docker secrets and configs must be created before deploying the service:
 
-- **Secret: `ip_updater_key`**: Your Cloudflare API token.
-- **Config: `ip_updater_zone`**: The Cloudflare Zone ID for your domain.
-- **Config: `ip_updater_record`**: The Record ID of the DNS 'A' record you want to update.
+- **Secret**: Your Cloudflare API token.
+- **Config**: The Cloudflare Zone ID for your domain.
+- **Config**: The Record ID of the DNS 'A' record you want to update.
 
 You can find the `Zone ID` on your Cloudflare dashboard. The `Record ID` can be found by using the Cloudflare API.
+
+After the docker setup specify the the following environment variables to allow the program to find the required data:
+- KEY_PATH. This will be something like `/run/secrets/secret_name`
+- ZONE_PATH. This will be something like `/path_config_name`
+- RECORD_PATH. This will be something like `/record_config_name`
 
 ### Environment Variables
 
