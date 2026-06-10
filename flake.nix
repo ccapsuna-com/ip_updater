@@ -2,7 +2,7 @@
   description = "IP updater binary build environment";
 
    inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05"; # Or a specific stable channel like "nixos-24.05"
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable"; # Or a specific stable channel like "nixos-24.05"
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
@@ -67,8 +67,10 @@
           '';
 
           KEY_PATH = "/home/cc/projects/ip_updater/ip_updater_key";
-          ZONE_PATH = "/home/cc/projects/ip_updater/ip_updater_zone";
-          RECORD_PATH = "/home/cc/projects/ip_updater/ip_updater_record";
+          CCAPSUNA_ZONE_PATH = "/home/cc/projects/ip_updater/ip_updater_ccapsuna_zone";
+          CCAPSUNA_RECORD_PATH = "/home/cc/projects/ip_updater/ip_updater_ccapsuna_record";
+          FILOTIMOCREATIONS_ZONE_PATH = "/home/cc/projects/ip_updater/ip_updater_filotimocreations_zone";
+          FILOTIMOCREATIONS_RECORD_PATH = "/home/cc/projects/ip_updater/ip_updater_filotimocreations_record";
           IP_UPDATER_INTERVAL_MINUTES = "0.1";
 
         };

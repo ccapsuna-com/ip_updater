@@ -40,12 +40,21 @@ static LOCK_FILE_DIRECTORY: Lazy<String> = Lazy::new(|| {
 static KEY_PATH: Lazy<String> = Lazy::new(|| {
     format!("{}", env::var("KEY_PATH").expect("KEY_PATH env var not defined"))
 });
-static ZONE_PATH: Lazy<String> = Lazy::new(|| {
-    format!("{}", env::var("ZONE_PATH").expect("ZONE_PATH env var not defined"))
-});
-static RECORD_PATH: Lazy<String> = Lazy::new(|| {
-    format!("{}", env::var("RECORD_PATH").expect("RECORD_PATH env var not defined"))
-});
+// Every domain to keep updated. The Cloudflare API token (KEY_PATH) is shared
+// across all of them; each domain has its own Zone ID and Record ID, supplied
+// via the env vars named below (which in turn point at the secret/config files).
+const DOMAINS: &[DomainConfig] = &[
+    DomainConfig {
+        name: "ccapsuna.com"
+        , zone_path_env: "CCAPSUNA_ZONE_PATH"
+        , record_path_env: "CCAPSUNA_RECORD_PATH"
+    }
+    , DomainConfig {
+        name: "filotimocreations.com"
+        , zone_path_env: "FILOTIMOCREATIONS_ZONE_PATH"
+        , record_path_env: "FILOTIMOCREATIONS_RECORD_PATH"
+    }
+];
 static IP_UPDATER_INTERVAL_SECONDS: Lazy<f64> = Lazy::new(|| {
     env::var("IP_UPDATER_INTERVAL_MINUTES")
         .unwrap_or_else(|_| "10".to_string())
@@ -57,11 +66,26 @@ const IP_HISTORY_FILE_NAME: &str = "ip_history.log";
 const MAIN_LOG_FILE_NAME: &str = "main.log";
 const FILE_LOG_OUTPUT_FORMAT: &str = "{d(%Y-%m-%d %H:%M:%S %Z)(utc)} {l} {t} - {m}{n}";
 
-#[derive(Deserialize, Debug)]
-struct AuthInfo {
-    key: String
+// Static description of a domain to update: its record name plus the names of
+// the env vars holding the paths to its Zone ID and Record ID files.
+struct DomainConfig {
+    name: &'static str
+    , zone_path_env: &'static str
+    , record_path_env: &'static str
+}
+
+// A domain with its Zone ID and Record ID resolved from the config files.
+#[derive(Debug)]
+struct ResolvedDomain {
+    name: &'static str
     , zone: String
     , record: String
+}
+
+#[derive(Debug)]
+struct AuthInfo {
+    key: String
+    , domains: Vec<ResolvedDomain>
 }
 
 #[derive(Serialize, Debug)]
@@ -170,26 +194,53 @@ fn get_auth_info() -> AuthInfo {
         ));
         unreachable!()
     });
-    let zone = read_to_string(ZONE_PATH.to_string()).unwrap_or_else(|e|{
-        log_error_and_panic(format!(
-            "Could not retrieve Cloudflare zone at path {}. Error was:\n\n{}"
-            , ZONE_PATH.to_string()
-            , e
-        ));
-        unreachable!()
-    });
-    let record = read_to_string(RECORD_PATH.to_string()).unwrap_or_else(|e|{
-        log_error_and_panic(format!(
-            "Could not retrieve Cloudflare record at path {}. Error was:\n\n{}"
-            , RECORD_PATH.to_string()
-            , e
-        ));
-        unreachable!()
-    });
+    let mut domains = Vec::with_capacity(DOMAINS.len());
+    for domain in DOMAINS {
+        let zone_path = env::var(domain.zone_path_env).unwrap_or_else(|e|{
+            log_error_and_panic(format!(
+                "Env var {} (Zone ID path for {}) not defined. Error was:\n\n{}"
+                , domain.zone_path_env
+                , domain.name
+                , e
+            ));
+            unreachable!()
+        });
+        let zone = read_to_string(&zone_path).unwrap_or_else(|e|{
+            log_error_and_panic(format!(
+                "Could not retrieve Cloudflare zone for {} at path {}. Error was:\n\n{}"
+                , domain.name
+                , zone_path
+                , e
+            ));
+            unreachable!()
+        });
+        let record_path = env::var(domain.record_path_env).unwrap_or_else(|e|{
+            log_error_and_panic(format!(
+                "Env var {} (Record ID path for {}) not defined. Error was:\n\n{}"
+                , domain.record_path_env
+                , domain.name
+                , e
+            ));
+            unreachable!()
+        });
+        let record = read_to_string(&record_path).unwrap_or_else(|e|{
+            log_error_and_panic(format!(
+                "Could not retrieve Cloudflare record for {} at path {}. Error was:\n\n{}"
+                , domain.name
+                , record_path
+                , e
+            ));
+            unreachable!()
+        });
+        domains.push(ResolvedDomain {
+            name: domain.name
+            , zone
+            , record
+        });
+    }
     AuthInfo {
         key
-        , zone
-        , record
+        , domains
     }
 }
 
@@ -198,20 +249,10 @@ fn record_ip_and_send(new_ip: Ipv4Addr) -> () {
     let api_key = format!("Bearer {}", auth_stuff.key);
     let api_url = "https://api.cloudflare.com/client/v4";
     let client = reqwest::blocking::Client::new();
-    let mut headers = HeaderMap::new();
-    let mut custom_header_value = HeaderValue::from_str(api_key.as_str()).unwrap_or_else(|e|{
-        log_error_and_panic(format!(
-            "Could not create header value. Error was:\n\n{}"
-            , e
-        ));
-        unreachable!()
-    });
-    custom_header_value.set_sensitive(true);
-    headers.insert(header::AUTHORIZATION, custom_header_value);
 
     // How to get the current ip from Cloudflare
-    
-    // let call_url = format!("{}/zones/{}/dns_records", api_url, auth_stuff.zone);
+
+    // let call_url = format!("{}/zones/{}/dns_records", api_url, zone);
     // let request = client.get(call_url)
     //     .headers(headers);
     // let response: cloudflare_get_records_response = request.send()
@@ -242,53 +283,73 @@ fn record_ip_and_send(new_ip: Ipv4Addr) -> () {
     // println!("{response_body:#?}");
     /////////////////
 
-    let ip_update_body = CloudflarePatchRecordRequest {
-        name: "ccapsuna.com"
-        , r#type: "A"
-        , content: new_ip
-    };
-    let serialized_ip_update_body = serde_json::to_string(&ip_update_body).unwrap_or_else(|e|{
-        log_error_and_panic(format!(
-            "Could not serialize path record struct. Struct was:\n\n{ip_update_body:#?}\n\nError was:\n\n{}"
-            , e
-        ));
-        unreachable!()
-    });
-
-    // println!("{serialized_ip_update_body}");
-
-    // // How to update the ip on Cloudflare
-
-    let call_url = format!("{}/zones/{}/dns_records/{}", api_url, auth_stuff.zone, auth_stuff.record);
-    let request = client.patch(call_url)
-        .headers(headers)
-        .body(serialized_ip_update_body);
-
-    let response = request.send().unwrap_or_else(|e|{
-        log_error_and_panic(format!(
-            "Error when trying to send request. Error was:\n\n{}"
-            , e
-        ));
-        unreachable!()
-    });
-    if response.status().is_success() {
-        info!(target: "history_logger", "The new ip is: {}", &new_ip);
-        info!("IP updated successfully");
-        ()
-    } else {
-        let response_text = response.text().unwrap_or_else(|e|{
+    for domain in &auth_stuff.domains {
+        // Fresh headers per request since `.headers()` consumes the map.
+        let mut headers = HeaderMap::new();
+        let mut custom_header_value = HeaderValue::from_str(api_key.as_str()).unwrap_or_else(|e|{
             log_error_and_panic(format!(
-                "IP update request could not be converted to text. Error was:\n\n{}"
+                "Could not create header value. Error was:\n\n{}"
                 , e
             ));
             unreachable!()
         });
-        log_error_and_panic(format!(
-            "IP update response did not return 200. Response was:\n\n{}"
-            , response_text
-        ));
-        unreachable!()
-    };
+        custom_header_value.set_sensitive(true);
+        headers.insert(header::AUTHORIZATION, custom_header_value);
+
+        let ip_update_body = CloudflarePatchRecordRequest {
+            name: domain.name
+            , r#type: "A"
+            , content: new_ip
+        };
+        let serialized_ip_update_body = serde_json::to_string(&ip_update_body).unwrap_or_else(|e|{
+            log_error_and_panic(format!(
+                "Could not serialize path record struct. Struct was:\n\n{ip_update_body:#?}\n\nError was:\n\n{}"
+                , e
+            ));
+            unreachable!()
+        });
+
+        // println!("{serialized_ip_update_body}");
+
+        // // How to update the ip on Cloudflare
+
+        let call_url = format!("{}/zones/{}/dns_records/{}", api_url, domain.zone, domain.record);
+        let request = client.patch(call_url)
+            .headers(headers)
+            .body(serialized_ip_update_body);
+
+        let response = request.send().unwrap_or_else(|e|{
+            log_error_and_panic(format!(
+                "Error when trying to send request for {}. Error was:\n\n{}"
+                , domain.name
+                , e
+            ));
+            unreachable!()
+        });
+        if response.status().is_success() {
+            info!("IP updated successfully for {}", domain.name);
+        } else {
+            let response_text = response.text().unwrap_or_else(|e|{
+                log_error_and_panic(format!(
+                    "IP update request for {} could not be converted to text. Error was:\n\n{}"
+                    , domain.name
+                    , e
+                ));
+                unreachable!()
+            });
+            log_error_and_panic(format!(
+                "IP update response for {} did not return 200. Response was:\n\n{}"
+                , domain.name
+                , response_text
+            ));
+            unreachable!()
+        };
+    }
+
+    // All domains updated successfully (any failure above panics), so record the
+    // new IP once. The history log is the source of truth for change detection,
+    // and its last entry must end with the IP for the parser in `main` to work.
+    info!(target: "history_logger", "The new ip is: {}", &new_ip);
 }
 
 fn release_lock() -> () {

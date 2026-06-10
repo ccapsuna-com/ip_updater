@@ -1,5 +1,7 @@
 /target
 .direnv
 ip_updater_key
-ip_updater_zone
-ip_updater_record
+ip_updater_ccapsuna_zone
+ip_updater_ccapsuna_record
+ip_updater_filotimocreations_zone
+ip_updater_filotimocreations_record
