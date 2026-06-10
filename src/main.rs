@@ -147,6 +147,28 @@ fn log_error_and_panic(error_message: String) {
     panic!("{error_message}")
 }
 
+// `HeaderValue::from_str` fails on any control byte (0x00-0x1F except tab, and
+// 0x7F) but its error doesn't say which byte or where. This reports the value's
+// byte length and every offending byte by position + hex, without logging the
+// secret itself, so a stray \r / \n / control char in the token is obvious.
+fn describe_invalid_header_bytes(value: &str) -> String {
+    let bad: Vec<String> = value
+        .bytes()
+        .enumerate()
+        .filter(|(_, b)| (*b < 0x20 && *b != b'\t') || *b == 0x7F)
+        .map(|(i, b)| format!("position {i}: 0x{b:02X}"))
+        .collect();
+    if bad.is_empty() {
+        format!("length: {} bytes; no control bytes found", value.len())
+    } else {
+        format!(
+            "length: {} bytes; offending bytes -> {}"
+            , value.len()
+            , bad.join(", ")
+        )
+    }
+}
+
 fn get_ip() -> Ipv4Addr {
     let ip_string_response = reqwest::blocking::get("https://api.ipify.org?format=json")
         .unwrap_or_else(|e|{
@@ -193,7 +215,9 @@ fn get_auth_info() -> AuthInfo {
             , e
         ));
         unreachable!()
-    });
+    // Secret/config files often carry a trailing newline (e.g. when created with
+    // `echo`), which makes the value invalid as a header and corrupts URLs.
+    }).trim().to_string();
     let mut domains = Vec::with_capacity(DOMAINS.len());
     for domain in DOMAINS {
         let zone_path = env::var(domain.zone_path_env).unwrap_or_else(|e|{
@@ -213,7 +237,7 @@ fn get_auth_info() -> AuthInfo {
                 , e
             ));
             unreachable!()
-        });
+        }).trim().to_string();
         let record_path = env::var(domain.record_path_env).unwrap_or_else(|e|{
             log_error_and_panic(format!(
                 "Env var {} (Record ID path for {}) not defined. Error was:\n\n{}"
@@ -231,7 +255,7 @@ fn get_auth_info() -> AuthInfo {
                 , e
             ));
             unreachable!()
-        });
+        }).trim().to_string();
         domains.push(ResolvedDomain {
             name: domain.name
             , zone
@@ -288,8 +312,11 @@ fn record_ip_and_send(new_ip: Ipv4Addr) -> () {
         let mut headers = HeaderMap::new();
         let mut custom_header_value = HeaderValue::from_str(api_key.as_str()).unwrap_or_else(|e|{
             log_error_and_panic(format!(
-                "Could not create header value. Error was:\n\n{}"
+                "Could not create Authorization header value for {}. Error was:\n\n{}\n\n\
+                Diagnostics for the \"Bearer <token>\" value: {}"
+                , domain.name
                 , e
+                , describe_invalid_header_bytes(api_key.as_str())
             ));
             unreachable!()
         });
